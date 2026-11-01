@@ -28,6 +28,11 @@ type Paragraph struct {
 	// NumLevel on nummerduse tase (0-põhine), -1 kui lõik pole nummerdatud.
 	NumLevel int  `json:"-"`
 	InTable  bool `json:"tabelis,omitempty"`
+	// Page on PDF-i lehekülg (1-põhine); .docx puhul 0.
+	Page int `json:"lk,omitempty"`
+	// LabelFromText on true, kui number on loetud lõigu tekstist (PDF), mitte
+	// Wordi automaatnummerdusest.
+	LabelFromText bool `json:"-"`
 }
 
 // Document on loetud dokument.
@@ -37,6 +42,8 @@ type Document struct {
 	Warnings []string
 	// TrackedChanges on true, kui dokumendis on jälgitavaid muudatusi.
 	TrackedChanges bool
+	// Format on "docx" või "pdf".
+	Format string
 }
 
 // ErrNotDocx tagastatakse, kui fail ei ole loetav .docx fail.
@@ -56,7 +63,7 @@ func Read(data []byte) (*Document, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: word/document.xml puudub (%v)", ErrNotDocx, err)
 	}
-	doc := &Document{}
+	doc := &Document{Format: "docx"}
 
 	styles := map[string]*style{}
 	if b, err := readZip(files, "word/styles.xml"); err == nil {

@@ -70,7 +70,11 @@ func Koosta(d *docx.Document) *Dokument {
 		switch {
 		case p.Label != "" && p.NumLevel >= 0:
 			s = &Sektsioon{Silt: p.Label, Number: NormaliseeriNumber(p.Label), Tase: p.NumLevel + 1, Allikas: "automaatnummerdus"}
-			autoNummerdus++
+			if p.LabelFromText {
+				s.Allikas = "kasitsi"
+			} else {
+				autoNummerdus++
+			}
 		case lisaPealkiri.MatchString(p.Text) && (p.HeadingLevel > 0 || len(p.Text) < 120):
 			m := lisaPealkiri.FindStringSubmatch(p.Text)
 			s = &Sektsioon{Silt: strings.TrimSpace(m[0]), Number: "Lisa " + strings.ToUpper(m[3]), Tase: 1, Allikas: "pealkiri"}
@@ -83,7 +87,7 @@ func Koosta(d *docx.Document) *Dokument {
 		}
 		if s != nil {
 			s.AlgusLoik = i
-			s.Pealkiri = pealkiri(p.Text, s.Allikas == "kasitsi")
+			s.Pealkiri = pealkiri(p.Text, s.Allikas == "kasitsi" && !p.LabelFromText)
 			for len(pinu) > 0 && pinu[len(pinu)-1].s.Tase >= s.Tase {
 				pinu = pinu[:len(pinu)-1]
 			}
@@ -126,7 +130,7 @@ func Koosta(d *docx.Document) *Dokument {
 		}
 		doc.Hoiatused = append(doc.Hoiatused, "korduvad punktinumbrid (viited neile on mitmetähenduslikud, kasutatakse esimest): "+strings.Join(dup, ", "))
 	}
-	if autoNummerdus == 0 && len(d.Paragraphs) > 0 {
+	if autoNummerdus == 0 && len(d.Paragraphs) > 0 && d.Format != "pdf" {
 		doc.Hoiatused = append(doc.Hoiatused, "dokumendis ei leitud Wordi automaatnummerdust; struktuur põhineb tekstis kirjutatud numbritel ja pealkirjadel")
 	}
 	return doc

@@ -28,10 +28,10 @@ func asice(t *testing.T, failid map[string][]byte) []byte {
 	return buf.Bytes()
 }
 
-func TestValiDocx(t *testing.T) {
+func TestValiDokument(t *testing.T) {
 	leping := testdocx.Koosta(testdocx.NaidisLeping(), testdocx.Nummerdus)
 	k := asice(t, map[string][]byte{"Leping.docx": leping, "Lisa1.pdf": []byte("%PDF-1.4")})
-	b, nimi, s, err := ValiDocx(k, "")
+	b, nimi, s, err := ValiDokument(k, "")
 	if err != nil || nimi != "Leping.docx" {
 		t.Fatalf("%v %s", err, nimi)
 	}
@@ -43,15 +43,35 @@ func TestValiDocx(t *testing.T) {
 	}
 
 	mitu := asice(t, map[string][]byte{"a.docx": leping, "b.docx": leping})
-	if _, _, _, err := ValiDocx(mitu, ""); err == nil || !strings.Contains(err.Error(), "mitu") {
+	if _, _, _, err := ValiDokument(mitu, ""); err == nil || !strings.Contains(err.Error(), "mitu") {
 		t.Errorf("mitu docx: %v", err)
 	}
-	if _, nimi, _, err := ValiDocx(mitu, "b.docx"); err != nil || nimi != "b.docx" {
+	if _, nimi, _, err := ValiDokument(mitu, "b.docx"); err != nil || nimi != "b.docx" {
 		t.Errorf("nimega valik: %v %s", err, nimi)
 	}
-	pdf := asice(t, map[string][]byte{"Leping.pdf": []byte("%PDF-1.4")})
-	if _, _, _, err := ValiDocx(pdf, ""); err == nil || !strings.Contains(err.Error(), "Leping.pdf") {
-		t.Errorf("ainult PDF: %v", err)
+	// ainult PDF: valitakse PDF
+	pdf := asice(t, map[string][]byte{"Leping.pdf": []byte("%PDF-1.4"), "volikiri.txt": []byte("x")})
+	if b, nimi, _, err := ValiDokument(pdf, ""); err != nil || nimi != "Leping.pdf" || string(b) != "%PDF-1.4" {
+		t.Errorf("ainult PDF: %v %s", err, nimi)
+	}
+	mituPDF := asice(t, map[string][]byte{"Leping.pdf": []byte("%PDF-1.4"), "Lisa 1.pdf": []byte("%PDF-1.5")})
+	if _, _, _, err := ValiDokument(mituPDF, ""); err == nil || !strings.Contains(err.Error(), "mitu PDF") {
+		t.Errorf("mitu PDF: %v", err)
+	}
+	if b, _, _, err := ValiDokument(mituPDF, "Lisa 1.pdf"); err != nil || string(b) != "%PDF-1.5" {
+		t.Errorf("PDF nime järgi: %v", err)
+	}
+	if _, _, _, err := ValiDokument(pdf, "volikiri.txt"); err == nil || !strings.Contains(err.Error(), "ei ole .docx ega .pdf") {
+		t.Errorf("toetamata vorming: %v", err)
+	}
+	// topeltallkiri: konteiner konteineris
+	topelt := asice(t, map[string][]byte{"leping.asice": pdf})
+	if _, nimi, _, err := ValiDokument(topelt, ""); err != nil || nimi != "leping.asice/Leping.pdf" {
+		t.Errorf("konteiner konteineris: %v %s", err, nimi)
+	}
+	tyhi := asice(t, map[string][]byte{"pilt.png": []byte("x")})
+	if _, _, _, err := ValiDokument(tyhi, ""); err == nil || !strings.Contains(err.Error(), "pilt.png") {
+		t.Errorf("analüüsitavat faili pole: %v", err)
 	}
 	if _, _, err := Loe([]byte(`<?xml version="1.0"?><SignedDoc/>`)); err != ErrDDOC {
 		t.Errorf("ddoc: %v", err)

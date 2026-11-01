@@ -12,6 +12,7 @@ import (
 	"github.com/Ker102/lepinguparser/internal/analyys"
 	"github.com/Ker102/lepinguparser/internal/docx"
 	"github.com/Ker102/lepinguparser/internal/konteiner"
+	"github.com/Ker102/lepinguparser/internal/pdf"
 )
 
 // MaxFailiSuurus piirab loetava faili suurust.
@@ -24,42 +25,74 @@ const JuurteMuutuja = "LEPINGUPARSER_JUURED"
 // ErrKeelatud tagastatakse, kui fail on väljaspool lubatud kaustu.
 var ErrKeelatud = errors.New("fail on väljaspool lubatud kaustu (" + JuurteMuutuja + ")")
 
-// Ava loeb ja analüüsib .docx faili või digiallkirja konteineri sees oleva
-// .docx faili.
+// Ava loeb ja analüüsib .docx või PDF-faili või digiallkirja konteineri
+// sees oleva .docx või PDF-faili.
 func Ava(tee string) (*analyys.Dokument, error) {
 	return AvaSees(tee, "")
 }
 
 // AvaSees on nagu Ava, kuid konteineri puhul saab määrata sisemise faili nime.
 func AvaSees(tee, sisemine string) (*analyys.Dokument, error) {
-	b, ext, err := loeFail(tee)
+	b, ext, nimi, err := loeDokument(tee, sisemine)
 	if err != nil {
 		return nil, err
 	}
-	var hoiatus string
-	switch {
-	case ext == ".docx":
-	case konteiner.Laiendid[ext]:
-		data, nimi, _, err := konteiner.ValiDocx(b, sisemine)
-		if err != nil {
-			return nil, err
-		}
-		b = data
-		hoiatus = "analüüsitud digiallkirja konteineri fail " + nimi + " (allkirjade kehtivust ei kontrollitud)"
-	case ext == ".ddoc":
-		return nil, konteiner.ErrDDOC
-	default:
-		return nil, fmt.Errorf("toetatud on .docx ja digiallkirja konteinerid (.asice, .bdoc); sain %q", ext)
+	var d *docx.Document
+	if ext == ".pdf" {
+		d, err = pdf.Read(b)
+	} else {
+		d, err = docx.Read(b)
 	}
-	d, err := docx.Read(b)
 	if err != nil {
 		return nil, err
 	}
 	doc := analyys.Koosta(d)
-	if hoiatus != "" {
-		doc.Hoiatused = append([]string{hoiatus}, doc.Hoiatused...)
+	if nimi != "" {
+		doc.Hoiatused = append([]string{"analüüsitud digiallkirja konteineri fail " + nimi + " (allkirjade kehtivust ei kontrollitud)"}, doc.Hoiatused...)
 	}
 	return doc, nil
+}
+
+// loeDokument loeb analüüsitava faili baidid. Konteineri puhul tagastab
+// sisemise faili ja selle nime.
+func loeDokument(tee, sisemine string) ([]byte, string, string, error) {
+	b, ext, err := loeFail(tee)
+	if err != nil {
+		return nil, "", "", err
+	}
+	switch {
+	case ext == ".docx" || ext == ".pdf":
+		return b, ext, "", nil
+	case konteiner.Laiendid[ext]:
+		data, nimi, _, err := konteiner.ValiDokument(b, sisemine)
+		if err != nil {
+			return nil, "", "", err
+		}
+		return data, strings.ToLower(filepath.Ext(nimi)), nimi, nil
+	case ext == ".ddoc":
+		return nil, "", "", konteiner.ErrDDOC
+	}
+	return nil, "", "", fmt.Errorf("toetatud on .docx, .pdf ja digiallkirja konteinerid (.asice, .bdoc); sain %q", ext)
+}
+
+// PDFTeave tagastab PDF-faili (ka konteineri sees oleva) metaandmed,
+// lehekülgede arvu ja PDF-i manustatud digiallkirjad.
+func PDFTeave(tee, sisemine string) (*pdf.Teave, error) {
+	b, ext, nimi, err := loeDokument(tee, sisemine)
+	if err != nil {
+		return nil, err
+	}
+	if ext != ".pdf" {
+		return nil, fmt.Errorf("%q ei ole PDF-fail", filepath.Base(tee))
+	}
+	t, err := pdf.Info(b)
+	if err != nil {
+		return nil, err
+	}
+	if nimi != "" {
+		t.Hoiatused = append([]string{"konteineri fail " + nimi}, t.Hoiatused...)
+	}
+	return t, nil
 }
 
 // KonteineriSisu loetleb digiallkirja konteineri failid.
@@ -198,4 +231,32 @@ func nonNil(s []string) []string {
 		return []string{}
 	}
 	return s
+}
+
+// TekstiLoik on dokumendi lõik koos numbri ja leheküljega.
+type TekstiLoik struct {
+	Loik     int    `json:"loik"`
+	Lk       int    `json:"lk,omitempty"`
+	Number   string `json:"number,omitempty"`
+	Pealkiri bool   `json:"pealkiri,omitempty"`
+	Tekst    string `json:"tekst"`
+}
+
+// Tekst on dokumendi kogu tekst lõikudena.
+type Tekst struct {
+	Loigud    []TekstiLoik `json:"loigud"`
+	Hoiatused []string     `json:"hoiatused"`
+}
+
+// TeeTekst tagastab dokumendi lõigud koos punktinumbritega (Wordi
+// automaatnummerduse numbrid on lõigu ees, nagu dokumendis näha).
+func TeeTekst(d *analyys.Dokument, alates, kuni int) Tekst {
+	out := Tekst{Loigud: []TekstiLoik{}, Hoiatused: nonNil(d.Hoiatused)}
+	for _, p := range d.Loigud {
+		if p.Text == "" && p.Label == "" || alates > 0 && p.Index < alates || kuni > 0 && p.Index > kuni {
+			continue
+		}
+		out.Loigud = append(out.Loigud, TekstiLoik{Loik: p.Index, Lk: p.Page, Number: p.Label, Pealkiri: p.HeadingLevel > 0, Tekst: p.Text})
+	}
+	return out
 }
