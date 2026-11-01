@@ -1,0 +1,4 @@
+/lepinguparser
+*.docx
+!internal/**/testdata/*.docx
+dist/
