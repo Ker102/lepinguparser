@@ -1,8 +1,9 @@
 # lepinguparser
 
-Lepingute `.docx` failide struktuurianalüüs eesti ja inglise keeles: punktide
-numbrid, definitsioonid, terminite kasutus (koos eesti käändevormidega) ja
-sisemised ristviited. Töötab käsurealt ja MCP serverina, nii et Claude ja
+Lepingute `.docx` ja PDF-failide struktuurianalüüs eesti ja inglise keeles:
+punktide numbrid, definitsioonid, terminite kasutus (koos eesti
+käändevormidega) ja sisemised ristviited. Faili võib anda ka digiallkirja
+konteineris (`.asice`, `.bdoc`). Töötab käsurealt ja MCP serverina, nii et Claude ja
 teised agendid saavad seda tööriistana kasutada.
 
 Tööriist ei saada dokumente kuhugi: kogu analüüs toimub kohalikus arvutis.
@@ -12,6 +13,7 @@ Tööriist ei saada dokumente kuhugi: kogu analüüs toimub kohalikus arvutis.
 | Käsk / MCP tööriist | Mida tagastab |
 | --- | --- |
 | `sisukord` | punktide numbrid ja pealkirjad, sh Wordi automaatnummerdusest arvutatud numbrid |
+| `tekst` | kogu tekst lõikudena koos punktinumbrite ja (PDF-i puhul) lehekülgedega |
 | `sektsioon` | ühe punkti (koos alapunktidega) tekst, nt `7.2`, `7.2(a)`, `Lisa 1` |
 | `definitsioonid` | defineeritud terminid |
 | `termin` / `termini_kasutus` | termini kõik esinemised, sh käändevormid |
@@ -19,6 +21,7 @@ Tööriist ei saada dokumente kuhugi: kogu analüüs toimub kohalikus arvutis.
 | `viited` | sisemised ristviited ja nende olek |
 | `kus-viidatakse` / `kus_viidatakse` | kõik kohad, kus viidatakse antud punktile |
 | `konteiner` / `konteineri_sisu` | digiallkirja konteineri failid ja allkirjafailide arv |
+| `pdf` / `pdf_teave` | PDF-i metaandmed, lehekülgede arv, tekstita (skannitud) lehed ja PDF-i manustatud allkirjad |
 | `kontroll` | koondaruanne: katkised viited, kasutamata ja topelt definitsioonid, enne defineerimist kasutatud terminid, kandidaadid, hoiatused |
 
 ### Mida see tunneb ära
@@ -43,6 +46,38 @@ Tööriist ei saada dokumente kuhugi: kogu analüüs toimub kohalikus arvutis.
 - **Jälgitavad muudatused:** analüüs kasutab teksti koos lisandustega ja ilma
   kustutusteta ning annab sellest hoiatuse.
 
+### PDF
+
+PDF-is ei ole lõike ega Wordi nummerdust, vaid lehele paigutatud märgid.
+Tööriist taastab teksti ise (ilma väliste programmideta):
+
+- **Eesti tähed** (õ, ä, ö, ü, š, ž) ja jutumärgid „ “ loetakse fondi
+  ToUnicode tabelist, kodeeringust (WinAnsi, MacRoman, `/Differences`) või
+  glüüfinimedest. Eraldi joonistatud rõhumärgid (`o` + `˜`) ühendatakse.
+- **Read ja lõigud** taastatakse märkide asukohast. Poolitatud sõnad
+  ühendatakse (`kokku-` + `leppe` → `kokkulepe`), aga `e-posti` ja
+  `IT-süsteem` jäävad sidekriipsuga. Lehtede vahel jätkuv lõik ühendatakse.
+- **Päised, jalused ja leheküljenumbrid** (`Lk 2/5`, `2 (5)`) eemaldatakse:
+  nii lehe servas korduvad read kui ka Wordi poolt artefaktiks märgitud
+  päised. Lisa päis (`Lisa 1`) jäetakse esimesel lehel alles, sest see
+  märgib lisa algust. Joonealused märkused ei katkesta lõiku.
+- **Punktinumbrid** (`7.2.`, `7.2`, `(a)`, `b)`, `(iii)`) tuvastatakse rea
+  algusest. Numbri järjestust kontrollitakse, et rea alguses olev kuupäev
+  (`15. jaanuaril`) või summa ei muutuks punktiks.
+- **Iga lõigu juures on lehekülg** (`lk`), et punkti saaks originaalist leida.
+- **Kaitstud PDF:** omaniku parooliga (kopeerimis- või muutmiskeeluga)
+  PDF loetakse (RC4, AES-128, AES-256). Kasutajaparooliga PDF-i jaoks antakse
+  selge veateade.
+- **PDF-i allkirjad** (PAdES, nt Smart-ID või ID-kaardiga PDF-i sisse
+  allkirjastatud): `pdf_teave` näitab allkirjastaja nime, sertifikaadi
+  väljaandjat, aega ja seda, kas faili on pärast viimast allkirja muudetud.
+  Isikukoodi väljundisse ei panda. **Kehtivust ei kontrollita.**
+
+Täpsust kontrolliti üheksa avaliku Eesti lepingu ja kohtuotsuse peal (Word,
+LibreOffice ja muud tootjad): sõnade kokkulangevus `pdftotext`-iga oli
+99,3–100 % (erinevused on peamiselt eemaldatud leheküljenumbrid) ja kõik
+punktinumbrid tuvastati.
+
 ### Viidete olekud
 
 | Olek | Tähendus |
@@ -57,14 +92,15 @@ Tööriist ei saada dokumente kuhugi: kogu analüüs toimub kohalikus arvutis.
 | Vorming | Tugi |
 | --- | --- |
 | `.docx` | täielik |
-| Digiallkirja konteiner `.asice`, `.bdoc` (ka `.sce`, `.edoc`) | sees olev `.docx` analüüsitakse otse, lahti pakkimata. Kui `.docx` faile on mitu, vali üks võtmega `-sees NIMI` (MCP: `sisemine`). `konteiner FAIL` loetleb sisu. **Allkirjade kehtivust ei kontrollita** – selleks on DigiDoc4. |
+| PDF | tekstikihiga PDF; lõigud ja numbrid taastatakse paigutusest (vt eespool) |
+| Digiallkirja konteiner `.asice`, `.bdoc` (ka `.sce`, `.edoc`) | sees olev `.docx` või PDF analüüsitakse otse, lahti pakkimata. Eelistatakse `.docx` faili. Kui faile on mitu, vali üks võtmega `-sees NIMI` (MCP: `sisemine`). Konteiner konteineris (topeltallkiri) avatakse. `konteiner FAIL` loetleb sisu. **Allkirjade kehtivust ei kontrollita** – selleks on DigiDoc4. |
+| Skannitud PDF (tekstikihita) | ei toeta; tee enne OCR |
 | Vana `.ddoc` | ei toeta; ava DigiDoc4-s ja salvesta sisu |
 | `.doc` | teisenda: `soffice --headless --convert-to docx fail.doc` |
-| PDF (ka konteineri sees) | praegu ei toeta |
 
 Eesti õiguspraktikas on mustandid ja läbirääkimised (jälgitavad muudatused)
-Wordis, allkirjastatud lõppversioonid aga sageli konteineris. Kui konteineris
-on PDF, küsi Wordi versiooni.
+Wordis, allkirjastatud lõppversioonid aga sageli konteineris PDF-ina. Kui
+Wordi versioon on olemas, on see täpsem (nummerdus tuleb otse failist).
 
 ### Piirangud
 
@@ -78,6 +114,10 @@ on PDF, küsi Wordi versiooni.
   viide seotakse esimesega.
 - Kui `numbering.xml` puudub või on vigane, antakse hoiatus. Struktuur
   põhineb siis tekstis olevatel numbritel ja pealkirjadel.
+- PDF-i lõigud ja punktinumbrid on tuletatud paigutusest. Tabelid loetakse
+  ridade kaupa, mitmeveeruline paigutus ei ole toetatud ja ebatavaline
+  nummerdus (nt numbrita alapunktid) võib jääda tuvastamata. Kontrolli
+  olulisi kohti originaalist; abiks on iga lõigu leheküljenumber.
 
 ## Paigaldamine
 
@@ -109,6 +149,10 @@ lepinguparser kus-viidatakse -t leping.docx 3
 lepinguparser konteiner leping.asice
 lepinguparser kontroll -t leping.asice              # .docx konteineri seest
 lepinguparser kontroll -t -sees Leping.docx leping.asice
+lepinguparser kontroll -t leping.pdf
+lepinguparser tekst -t leping.pdf                   # tekst lõikudena, lk kaupa
+lepinguparser pdf leping.pdf                        # metaandmed ja PDF-i allkirjad
+lepinguparser sisukord -t -sees "Lisa 1.pdf" leping.asice
 ```
 
 Väljumiskoodid: `0` korras, `1` viga (nt faili ei saa lugeda või punkti ei
@@ -158,7 +202,8 @@ Kui tööriist annab vale tulemuse või vea:
 1. Uuenda: `go install github.com/Ker102/lepinguparser/cmd/lepinguparser@latest`.
 2. Vaata teadaolevaid probleeme: https://github.com/Ker102/lepinguparser/issues
 3. Teata probleemist või saada parandus (fork → haru → pull request).
-   Lisa test, mis koostab probleemse struktuuri `internal/testdocx` abil.
+   Lisa test, mis koostab probleemse struktuuri `internal/testdocx` või
+   `internal/testpdf` abil.
 
 **Ära lisa probleemi juurde kliendi lepingut.** Hoidla on avalik.
 Kirjelda struktuuri (nt „punkt 3.3 alapunkt (b) nummerdatakse valesti,
@@ -171,9 +216,10 @@ go test ./...
 go vet ./...
 ```
 
-Testid koostavad testdokumendid koodis (`internal/testdocx`), seega pole
-repos kliendidokumente. Uue mustri lisamisel lisa test failidesse
-`internal/analyys/analyys_test.go` ja `internal/docx/docx_test.go`.
+Testid koostavad testdokumendid koodis (`internal/testdocx`,
+`internal/testpdf`), seega pole repos kliendidokumente. Uue mustri lisamisel
+lisa test failidesse `internal/analyys/analyys_test.go`,
+`internal/docx/docx_test.go` või `internal/pdf/pdf_test.go`.
 
 Nummerduse kontrollimiseks päris dokumendi peal saab tulemust võrrelda
 LibreOffice'i tekstiekspordiga:
@@ -183,15 +229,25 @@ soffice --headless --convert-to "txt:Text (encoded):UTF8" leping.docx
 lepinguparser sisukord -t leping.docx
 ```
 
+PDF-i teksti saab võrrelda Poppleri `pdftotext`-iga:
+
+```bash
+pdftotext -enc UTF-8 -layout leping.pdf -
+lepinguparser tekst -t leping.pdf
+```
+
 ### Ülesehitus
 
 ```
 cmd/lepinguparser/      käsurida ja MCP käivitus
 internal/docx/          .docx lugemine, stiilid, Wordi nummerdusmootor
+internal/pdf/           PDF-i lugemine: xref, filtrid, krüpto, fondid, paigutus, allkirjad
+internal/konteiner/     digiallkirja konteinerid (.asice, .bdoc)
 internal/analyys/       struktuur, definitsioonid, käändevormid, viited, kontroll
 internal/teenus/        faili avamine, juurdepääsupiirang, ühised vastused
 internal/mcpserver/     MCP tööriistad
 internal/testdocx/      testdokumentide koostaja
+internal/testpdf/       test-PDF-ide koostaja
 skills/lepinguparser/   agendi oskus (skill): millal ja kuidas tööriista kasutada
 ```
 

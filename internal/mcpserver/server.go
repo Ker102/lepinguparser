@@ -8,42 +8,50 @@ import (
 
 	"github.com/Ker102/lepinguparser/internal/analyys"
 	"github.com/Ker102/lepinguparser/internal/konteiner"
+	"github.com/Ker102/lepinguparser/internal/pdf"
 	"github.com/Ker102/lepinguparser/internal/teenus"
 )
 
 type failSisend struct {
-	Fail     string `json:"fail" jsonschema:".docx faili või digiallkirja konteineri (.asice, .bdoc) absoluutne tee"`
-	Sisemine string `json:"sisemine,omitempty" jsonschema:"konteineri puhul sisemise .docx faili nimi, kui neid on mitu"`
+	Fail     string `json:"fail" jsonschema:".docx või PDF-faili või digiallkirja konteineri (.asice, .bdoc) absoluutne tee"`
+	Sisemine string `json:"sisemine,omitempty" jsonschema:"konteineri puhul sisemise .docx või PDF-faili nimi, kui neid on mitu"`
 }
 
 type sisukordSisend struct {
-	Fail     string `json:"fail" jsonschema:".docx faili või digiallkirja konteineri (.asice, .bdoc) absoluutne tee"`
-	Sisemine string `json:"sisemine,omitempty" jsonschema:"konteineri puhul sisemise .docx faili nimi, kui neid on mitu"`
+	Fail     string `json:"fail" jsonschema:".docx või PDF-faili või digiallkirja konteineri (.asice, .bdoc) absoluutne tee"`
+	Sisemine string `json:"sisemine,omitempty" jsonschema:"konteineri puhul sisemise .docx või PDF-faili nimi, kui neid on mitu"`
 	MaxTase  int    `json:"max_tase,omitempty" jsonschema:"näita ainult kuni selle tasemeni (0 = kõik)"`
 }
 
 type sektsioonSisend struct {
-	Fail     string `json:"fail" jsonschema:".docx faili või digiallkirja konteineri (.asice, .bdoc) absoluutne tee"`
-	Sisemine string `json:"sisemine,omitempty" jsonschema:"konteineri puhul sisemise .docx faili nimi, kui neid on mitu"`
+	Fail     string `json:"fail" jsonschema:".docx või PDF-faili või digiallkirja konteineri (.asice, .bdoc) absoluutne tee"`
+	Sisemine string `json:"sisemine,omitempty" jsonschema:"konteineri puhul sisemise .docx või PDF-faili nimi, kui neid on mitu"`
 	Number   string `json:"number" jsonschema:"punkti number, nt 7.2, 7.2(a) või Lisa 1"`
 }
 
 type terminSisend struct {
-	Fail     string `json:"fail" jsonschema:".docx faili või digiallkirja konteineri (.asice, .bdoc) absoluutne tee"`
-	Sisemine string `json:"sisemine,omitempty" jsonschema:"konteineri puhul sisemise .docx faili nimi, kui neid on mitu"`
+	Fail     string `json:"fail" jsonschema:".docx või PDF-faili või digiallkirja konteineri (.asice, .bdoc) absoluutne tee"`
+	Sisemine string `json:"sisemine,omitempty" jsonschema:"konteineri puhul sisemise .docx või PDF-faili nimi, kui neid on mitu"`
 	Termin   string `json:"termin" jsonschema:"defineeritud termin algvormis, nt Leping"`
 }
 
 type kandidaadidSisend struct {
-	Fail     string `json:"fail" jsonschema:".docx faili või digiallkirja konteineri (.asice, .bdoc) absoluutne tee"`
-	Sisemine string `json:"sisemine,omitempty" jsonschema:"konteineri puhul sisemise .docx faili nimi, kui neid on mitu"`
+	Fail     string `json:"fail" jsonschema:".docx või PDF-faili või digiallkirja konteineri (.asice, .bdoc) absoluutne tee"`
+	Sisemine string `json:"sisemine,omitempty" jsonschema:"konteineri puhul sisemise .docx või PDF-faili nimi, kui neid on mitu"`
 	Piir     int    `json:"piir,omitempty" jsonschema:"maksimaalne tulemuste arv (vaikimisi 50)"`
 }
 
 type viitedSisend struct {
-	Fail     string `json:"fail" jsonschema:".docx faili või digiallkirja konteineri (.asice, .bdoc) absoluutne tee"`
-	Sisemine string `json:"sisemine,omitempty" jsonschema:"konteineri puhul sisemise .docx faili nimi, kui neid on mitu"`
+	Fail     string `json:"fail" jsonschema:".docx või PDF-faili või digiallkirja konteineri (.asice, .bdoc) absoluutne tee"`
+	Sisemine string `json:"sisemine,omitempty" jsonschema:"konteineri puhul sisemise .docx või PDF-faili nimi, kui neid on mitu"`
 	Olek     string `json:"olek,omitempty" jsonschema:"filtreeri oleku järgi: leitud, puudub, lisa_eraldi, valine"`
+}
+
+type tekstSisend struct {
+	Fail     string `json:"fail" jsonschema:".docx või PDF-faili või digiallkirja konteineri (.asice, .bdoc) absoluutne tee"`
+	Sisemine string `json:"sisemine,omitempty" jsonschema:"konteineri puhul sisemise .docx või PDF-faili nimi, kui neid on mitu"`
+	Alates   int    `json:"alates,omitempty" jsonschema:"esimene lõik (loik), vaikimisi algusest"`
+	Kuni     int    `json:"kuni,omitempty" jsonschema:"viimane lõik (loik), vaikimisi lõpuni"`
 }
 
 type definitsioonidVastus struct {
@@ -65,13 +73,22 @@ type viitedVastus struct {
 func Uus(versioon string) *mcp.Server {
 	s := mcp.NewServer(&mcp.Implementation{Name: "lepinguparser", Version: versioon}, nil)
 
-	mcp.AddTool(s, &mcp.Tool{Name: "sisukord", Description: "Lepingu (.docx) struktuur: punktide numbrid Wordi automaatnummerdusest või tekstist, pealkirjad ja tasemed."},
+	mcp.AddTool(s, &mcp.Tool{Name: "sisukord", Description: "Lepingu (.docx või PDF) struktuur: punktide numbrid Wordi automaatnummerdusest või tekstist, pealkirjad ja tasemed. PDF-i puhul taastatakse numbrid lehe paigutusest."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in sisukordSisend) (*mcp.CallToolResult, teenus.Sisukord, error) {
 			d, err := teenus.AvaSees(in.Fail, in.Sisemine)
 			if err != nil {
 				return nil, teenus.Sisukord{}, err
 			}
 			return nil, teenus.TeeSisukord(d, in.MaxTase), nil
+		})
+
+	mcp.AddTool(s, &mcp.Tool{Name: "tekst", Description: "Dokumendi tekst lõikudena koos punktinumbrite ja (PDF-i puhul) lehekülgedega. PDF-ist eemaldatakse korduvad päised, jalused ja leheküljenumbrid ning poolitatud sõnad ühendatakse. Pika dokumendi korral kasuta alates/kuni."},
+		func(ctx context.Context, _ *mcp.CallToolRequest, in tekstSisend) (*mcp.CallToolResult, teenus.Tekst, error) {
+			d, err := teenus.AvaSees(in.Fail, in.Sisemine)
+			if err != nil {
+				return nil, teenus.Tekst{}, err
+			}
+			return nil, teenus.TeeTekst(d, in.Alates, in.Kuni), nil
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "sektsioon", Description: "Tagastab lepingu ühe punkti (koos alapunktidega) teksti numbri järgi, nt 7.2 või Lisa 1."},
@@ -164,6 +181,12 @@ func Uus(versioon string) *mcp.Server {
 		func(ctx context.Context, _ *mcp.CallToolRequest, in failSisend) (*mcp.CallToolResult, *konteiner.Sisu, error) {
 			k, err := teenus.KonteineriSisu(in.Fail)
 			return nil, k, err
+		})
+
+	mcp.AddTool(s, &mcp.Tool{Name: "pdf_teave", Description: "PDF-faili (ka konteineri sees oleva) metaandmed, lehekülgede arv, tekstita (skannitud) lehed ja PDF-i manustatud digiallkirjad (PAdES): allkirjastaja nimi, sertifikaadi väljaandja, aeg ja kas allkiri katab kogu faili. Kehtivust ei kontrollita."},
+		func(ctx context.Context, _ *mcp.CallToolRequest, in failSisend) (*mcp.CallToolResult, *pdf.Teave, error) {
+			t, err := teenus.PDFTeave(in.Fail, in.Sisemine)
+			return nil, t, err
 		})
 
 	return s

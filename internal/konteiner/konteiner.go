@@ -76,27 +76,42 @@ func Loe(b []byte) (*Sisu, *zip.Reader, error) {
 	return s, zr, nil
 }
 
-// ValiDocx leiab konteinerist analüüsitava .docx faili. Kui nimi on tühi ja
-// .docx faile on täpselt üks, valitakse see.
-func ValiDocx(b []byte, nimi string) ([]byte, string, *Sisu, error) {
+// Analuusitavad on konteineri sees analüüsitavad vormingud.
+var Analuusitavad = map[string]bool{".docx": true, ".pdf": true}
+
+// ValiDokument leiab konteinerist analüüsitava faili (.docx või .pdf). Kui
+// nimi on tühi, eelistatakse ainsat .docx faili, selle puudumisel ainsat
+// .pdf faili. Kui konteineri sees on ainult teine konteiner (topeltallkiri),
+// otsitakse sealt.
+func ValiDokument(b []byte, nimi string) ([]byte, string, *Sisu, error) {
+	return valiDokument(b, nimi, 0)
+}
+
+func valiDokument(b []byte, nimi string, sugavus int) ([]byte, string, *Sisu, error) {
 	s, zr, err := Loe(b)
 	if err != nil {
 		return nil, "", nil, err
 	}
-	var kandidaadid []*zip.File
+	var docxid, pdfid, sisemised []*zip.File
+	var valitud *zip.File
 	for _, f := range zr.File {
-		if strings.HasPrefix(f.Name, "META-INF/") {
+		if strings.HasPrefix(f.Name, "META-INF/") || strings.HasSuffix(f.Name, "/") {
 			continue
 		}
 		if nimi != "" {
 			if f.Name == nimi || path.Base(f.Name) == nimi {
-				kandidaadid = []*zip.File{f}
+				valitud = f
 				break
 			}
 			continue
 		}
-		if strings.EqualFold(path.Ext(f.Name), ".docx") {
-			kandidaadid = append(kandidaadid, f)
+		switch ext := strings.ToLower(path.Ext(f.Name)); {
+		case ext == ".docx":
+			docxid = append(docxid, f)
+		case ext == ".pdf":
+			pdfid = append(pdfid, f)
+		case Laiendid[ext]:
+			sisemised = append(sisemised, f)
 		}
 	}
 	nimed := func() string {
@@ -107,31 +122,56 @@ func ValiDocx(b []byte, nimi string) ([]byte, string, *Sisu, error) {
 		return strings.Join(n, ", ")
 	}
 	switch {
-	case nimi != "" && len(kandidaadid) == 0:
+	case nimi != "" && valitud == nil:
 		return nil, "", s, fmt.Errorf("konteineris ei ole faili %q; failid: %s", nimi, nimed())
-	case len(kandidaadid) == 0:
-		return nil, "", s, fmt.Errorf("konteineris ei ole .docx faili (failid: %s); PDF-i tööriist praegu ei analüüsi", nimed())
-	case len(kandidaadid) > 1:
+	case valitud != nil:
+	case len(docxid) == 1:
+		valitud = docxid[0]
+	case len(docxid) > 1:
 		return nil, "", s, fmt.Errorf("konteineris on mitu .docx faili, vali üks (sisemine): %s", nimed())
+	case len(pdfid) == 1:
+		valitud = pdfid[0]
+	case len(pdfid) > 1:
+		return nil, "", s, fmt.Errorf("konteineris on mitu PDF-faili, vali üks (sisemine): %s", nimed())
+	case len(sisemised) == 1 && sugavus < 3:
+		data, err := loeSisemine(sisemised[0])
+		if err != nil {
+			return nil, "", s, err
+		}
+		d, n, _, err := valiDokument(data, "", sugavus+1)
+		if err != nil {
+			return nil, "", s, fmt.Errorf("%s: %w", sisemised[0].Name, err)
+		}
+		return d, sisemised[0].Name + "/" + n, s, nil
+	default:
+		return nil, "", s, fmt.Errorf("konteineris ei ole .docx ega .pdf faili (failid: %s)", nimed())
 	}
-	f := kandidaadid[0]
-	if !strings.EqualFold(path.Ext(f.Name), ".docx") {
-		return nil, "", s, fmt.Errorf("%s ei ole .docx fail; PDF-i ja muid vorminguid tööriist praegu ei analüüsi", f.Name)
+	ext := strings.ToLower(path.Ext(valitud.Name))
+	if !Analuusitavad[ext] {
+		return nil, "", s, fmt.Errorf("%s ei ole .docx ega .pdf fail; muid vorminguid tööriist ei analüüsi", valitud.Name)
 	}
+	data, err := loeSisemine(valitud)
+	if err != nil {
+		return nil, "", s, err
+	}
+	return data, valitud.Name, s, nil
+}
+
+func loeSisemine(f *zip.File) ([]byte, error) {
 	if f.UncompressedSize64 > MaxSisemine {
-		return nil, "", s, fmt.Errorf("%s on liiga suur (%d baiti)", f.Name, f.UncompressedSize64)
+		return nil, fmt.Errorf("%s on liiga suur (%d baiti)", f.Name, f.UncompressedSize64)
 	}
 	rc, err := f.Open()
 	if err != nil {
-		return nil, "", s, err
+		return nil, err
 	}
 	defer rc.Close()
 	data, err := io.ReadAll(io.LimitReader(rc, MaxSisemine+1))
 	if err != nil {
-		return nil, "", s, err
+		return nil, err
 	}
 	if len(data) > MaxSisemine {
-		return nil, "", s, fmt.Errorf("%s on liiga suur", f.Name)
+		return nil, fmt.Errorf("%s on liiga suur", f.Name)
 	}
-	return data, f.Name, s, nil
+	return data, nil
 }

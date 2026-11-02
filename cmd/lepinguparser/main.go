@@ -1,4 +1,4 @@
-// Käsk lepinguparser analüüsib lepingute .docx faile: struktuur,
+// Käsk lepinguparser analüüsib lepingute .docx ja PDF-faile: struktuur,
 // definitsioonid, terminite kasutus ja sisemised ristviited.
 package main
 
@@ -17,12 +17,12 @@ import (
 	"github.com/Ker102/lepinguparser/internal/teenus"
 )
 
-var versioon = "0.1.0"
+var versioon = "0.2.0"
 
-const kasutus = `lepinguparser – lepingu .docx faili struktuuri ja terminite analüüs
+const kasutus = `lepinguparser – lepingu .docx või PDF-faili struktuuri ja terminite analüüs
 
 Kasutus:
-  lepinguparser <käsk> [valikud] FAIL.docx [argument]
+  lepinguparser <käsk> [valikud] FAIL [argument]
 
 Käsud:
   sisukord FAIL                 punktide numbrid ja pealkirjad
@@ -33,7 +33,9 @@ Käsud:
   viited FAIL                   sisemised ristviited ja nende olek
   kus-viidatakse FAIL NR        kus viidatakse punktile NR
   kontroll FAIL                 koondkontroll (katkised viited, kasutamata terminid jm)
+  tekst FAIL                    kogu tekst lõikudena koos punktinumbrite ja lk-ga
   konteiner FAIL                digiallkirja konteineri (.asice, .bdoc) failid
+  pdf FAIL                      PDF-i metaandmed, lehekülgede arv ja PDF-i allkirjad
   mcp                           käivita MCP server (stdio)
   versioon                      näita versiooni
 
@@ -42,10 +44,11 @@ Valikud (enne faili nime):
   -tase N                       sisukord: näita kuni tasemeni N
   -olek OLEK                    viited: filtreeri (leitud, puudub, lisa_eraldi, valine)
   -piir N                       defineerimata: tulemuste arv (vaikimisi 50)
-  -sees NIMI                    konteineri puhul sisemise .docx faili nimi
+  -sees NIMI                    konteineri puhul sisemise faili nimi
 
-FAIL võib olla .docx või digiallkirja konteiner (.asice, .bdoc), mille sees
-on .docx. Allkirjade kehtivust ei kontrollita.
+FAIL võib olla .docx, .pdf või digiallkirja konteiner (.asice, .bdoc), mille
+sees on .docx või .pdf. PDF-i lõigud ja punktinumbrid taastatakse lehe
+paigutusest. Allkirjade kehtivust ei kontrollita.
 
 Väljumiskoodid: 0 = korras, 1 = viga, 2 = vale kasutus,
                 3 = kontroll leidis katkiseid viiteid.
@@ -102,7 +105,23 @@ func run(args []string, out, errw io.Writer) int {
 		_ = enc.Encode(k)
 		return 0
 	}
-	need := map[string]int{"sisukord": 1, "sektsioon": 2, "definitsioonid": 1, "termin": 2, "defineerimata": 1, "viited": 1, "kus-viidatakse": 2, "kontroll": 1}
+	if cmd == "pdf" {
+		if len(pos) < 1 {
+			fmt.Fprintln(errw, "käsk \"pdf\" vajab faili")
+			return 2
+		}
+		t, err := teenus.PDFTeave(pos[0], *sees)
+		if err != nil {
+			fmt.Fprintln(errw, "viga:", err)
+			return 1
+		}
+		enc := json.NewEncoder(out)
+		enc.SetIndent("", "  ")
+		enc.SetEscapeHTML(false)
+		_ = enc.Encode(t)
+		return 0
+	}
+	need := map[string]int{"tekst": 1, "sisukord": 1, "sektsioon": 2, "definitsioonid": 1, "termin": 2, "defineerimata": 1, "viited": 1, "kus-viidatakse": 2, "kontroll": 1}
 	n, ok := need[cmd]
 	if !ok {
 		fmt.Fprintf(errw, "tundmatu käsk %q\n\n%s", cmd, kasutus)
@@ -122,6 +141,8 @@ func run(args []string, out, errw io.Writer) int {
 	var res any
 	code := 0
 	switch cmd {
+	case "tekst":
+		res = teenus.TeeTekst(d, 0, 0)
 	case "sisukord":
 		res = teenus.TeeSisukord(d, *tase)
 	case "sektsioon":
@@ -172,6 +193,20 @@ func prindiTekst(w io.Writer, cmd string, res any) {
 	case teenus.Sisukord:
 		for _, r := range v.Read {
 			fmt.Fprintf(w, "%s%-10s %s\n", strings.Repeat("  ", max(0, r.Tase-1)), r.Number, r.Pealkiri)
+		}
+		hoiatused(w, v.Hoiatused)
+	case teenus.Tekst:
+		lk := 0
+		for _, l := range v.Loigud {
+			if l.Lk != lk && l.Lk > 0 {
+				lk = l.Lk
+				fmt.Fprintf(w, "--- lk %d ---\n", lk)
+			}
+			if l.Number != "" {
+				fmt.Fprintf(w, "%s %s\n", l.Number, l.Tekst)
+			} else {
+				fmt.Fprintln(w, l.Tekst)
+			}
 		}
 		hoiatused(w, v.Hoiatused)
 	case teenus.SektsiooniVastus:
